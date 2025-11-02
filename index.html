@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Chomp (K×K)</title>
     <style>
       :root {
@@ -30,10 +32,13 @@
         display: flex;
         flex-direction: column;
         color: #1f2933;
+        -webkit-text-size-adjust: 100%;
+        padding-bottom: env(safe-area-inset-bottom);
       }
 
       header {
-        padding: 1.5rem clamp(1rem, 3vw, 3rem);
+        padding: calc(1.5rem + env(safe-area-inset-top))
+          clamp(1rem, 3vw, 3rem) 1.5rem clamp(1rem, 3vw, 3rem);
         background: rgba(255, 255, 255, 0.8);
         box-shadow: 0 1px 8px rgba(15, 23, 42, 0.08);
         backdrop-filter: blur(8px);
@@ -62,6 +67,7 @@
           );
         gap: clamp(1rem, 3vw, 2rem);
         padding: clamp(1rem, 3vw, 2.5rem);
+        padding-bottom: calc(clamp(1.5rem, 4vw, 3rem) + env(safe-area-inset-bottom));
         align-items: start;
       }
 
@@ -92,6 +98,40 @@
         .notes-panel {
           width: min(100%, 520px);
           margin-inline: auto;
+        }
+      }
+
+      @media (max-width: 600px) {
+        header p {
+          font-size: 0.95rem;
+        }
+
+        .size-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .size-row input[type="number"] {
+          width: 100%;
+        }
+
+        .size-row input[type="range"] {
+          width: 100%;
+        }
+
+        .toggle-group,
+        .action-row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .toggle-group button,
+        .action-row button {
+          width: 100%;
+        }
+
+        .status-area {
+          font-size: 0.92rem;
         }
       }
 
@@ -160,6 +200,8 @@
         background: #edf2ff;
         color: #1e3a8a;
         transition: transform 0.15s ease, box-shadow 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
       }
 
       button:focus-visible {
@@ -205,25 +247,36 @@
 
       .board-wrapper {
         position: relative;
-        overflow: hidden;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        padding: clamp(0.25rem, 1vw, 0.6rem);
       }
 
       .board-container {
         display: grid;
-        gap: 0.2rem;
+        gap: clamp(0.12rem, 0.5vw, 0.25rem);
         background: rgba(15, 23, 42, 0.05);
         padding: 0.4rem;
         border-radius: 0.9rem;
         border: 1px solid rgba(148, 163, 184, 0.35);
+        --index-size: clamp(1.4rem, 5vw, 2.6rem);
+        --cell-size: clamp(1.6rem, 6.5vw, 3rem);
+        width: max-content;
+        max-width: 100%;
+        margin-inline: auto;
+        touch-action: manipulation;
       }
 
       .board-container .corner-cell,
       .board-container .index-cell {
         display: grid;
         place-items: center;
-        font-size: 0.85rem;
+        font-size: clamp(0.75rem, 2.8vw, 0.95rem);
         color: #475569;
         font-weight: 600;
+        width: var(--index-size);
+        height: var(--index-size);
       }
 
       .cell {
@@ -234,18 +287,27 @@
         color: #111827;
         display: grid;
         place-items: center;
-        min-height: 2.8rem;
+        width: var(--cell-size);
+        height: var(--cell-size);
+        min-height: 0;
+        font-size: clamp(0.75rem, 3vw, 1rem);
         transition: background-color 0.15s ease, transform 0.12s ease,
           opacity 0.2s ease;
+        touch-action: manipulation;
       }
 
       .cell[data-locked="true"] {
         cursor: not-allowed;
       }
 
-      .cell.alive:hover,
       .cell.alive:focus-visible {
         background: rgba(37, 99, 235, 0.08);
+      }
+
+      @media (hover: hover) {
+        .cell.alive:hover {
+          background: rgba(37, 99, 235, 0.08);
+        }
       }
 
       .cell.removed {
@@ -591,6 +653,7 @@
       const MAX_K = 12;
       const solverCache = new Map();
       const boardContainer = document.getElementById("board");
+      const boardWrapper = document.querySelector(".board-wrapper");
       const overlay = document.getElementById("overlay");
       const overlayMessage = document.getElementById("overlay-message");
       const playAgainBtn = document.getElementById("play-again");
@@ -611,6 +674,7 @@
       const statusMessage = document.getElementById("status-message");
       let cellElements = [];
       let previewCells = [];
+      let boardSizeFrame = null;
 
       function init(newK) {
         cancelBot();
@@ -619,7 +683,68 @@
         buildBoardGrid();
         render();
         updateControls();
+        scheduleBoardSizing();
       }
+
+      function scheduleBoardSizing() {
+        if (!boardContainer || !boardWrapper) return;
+        if (boardSizeFrame) cancelAnimationFrame(boardSizeFrame);
+        boardSizeFrame = requestAnimationFrame(() => {
+          boardSizeFrame = null;
+          updateBoardSizing();
+        });
+      }
+
+      function updateBoardSizing() {
+        if (!boardContainer || !boardWrapper) return;
+        const wrapperWidth = boardWrapper.clientWidth ||
+          boardWrapper.getBoundingClientRect().width;
+        if (!wrapperWidth) return;
+        const computed = getComputedStyle(boardContainer);
+        const gapValue = parseFloat(computed.columnGap || computed.gap || 0);
+        const totalGap = gapValue * state.K;
+        const viewportWidth = window.innerWidth || wrapperWidth;
+        const widthLimit = Math.max(0, Math.min(wrapperWidth, viewportWidth - 16));
+        if (!widthLimit) return;
+        const availableWidth = Math.max(widthLimit - totalGap, 0);
+        let cellSize = availableWidth / (state.K + 0.85);
+        if (!Number.isFinite(cellSize) || cellSize <= 0) {
+          cellSize = 32;
+        }
+        cellSize = Math.min(cellSize, 64);
+        let indexSize = Math.min(cellSize * 0.9, 52);
+        let totalWidth = indexSize + state.K * cellSize + totalGap;
+        if (totalWidth > widthLimit && totalWidth > 0) {
+          const ratio = widthLimit / totalWidth;
+          cellSize *= ratio;
+          indexSize *= ratio;
+        }
+        if (cellSize < 14) {
+          indexSize = Math.max(indexSize, cellSize * 0.9);
+        }
+        boardContainer.style.setProperty("--index-size", `${indexSize}px`);
+        boardContainer.style.setProperty("--cell-size", `${cellSize}px`);
+        boardContainer.style.gridTemplateColumns = `var(--index-size) repeat(${state.K}, var(--cell-size))`;
+        boardContainer.style.gridTemplateRows = `var(--index-size) repeat(${state.K}, var(--cell-size))`;
+      }
+
+      const supportsResizeObserver = typeof ResizeObserver !== "undefined";
+      if (supportsResizeObserver && boardWrapper) {
+        const boardObserver = new ResizeObserver(() => {
+          scheduleBoardSizing();
+        });
+        boardObserver.observe(boardWrapper);
+      }
+
+      window.addEventListener("resize", () => {
+        scheduleBoardSizing();
+      });
+
+      window.addEventListener("orientationchange", () => {
+        setTimeout(() => {
+          scheduleBoardSizing();
+        }, 120);
+      });
 
       function clampBoardSize(value) {
         if (Number.isNaN(value)) return state.K;
@@ -648,8 +773,8 @@
 
       function buildBoardGrid() {
         boardContainer.innerHTML = "";
-        boardContainer.style.gridTemplateColumns = `3rem repeat(${state.K}, minmax(2.5rem, 1fr))`;
-        boardContainer.style.gridTemplateRows = `3rem repeat(${state.K}, minmax(2.5rem, 1fr))`;
+        boardContainer.style.gridTemplateColumns = `var(--index-size) repeat(${state.K}, var(--cell-size))`;
+        boardContainer.style.gridTemplateRows = `var(--index-size) repeat(${state.K}, var(--cell-size))`;
         cellElements = Array.from({ length: state.K }, () =>
           Array(state.K)
         );
@@ -698,6 +823,23 @@
             });
             cell.addEventListener("mouseleave", () => {
               clearPreview();
+            });
+            cell.addEventListener(
+              "touchstart",
+              () => {
+                if (!isAlive(row, col)) return;
+                setPreview(row, col);
+              },
+              { passive: true }
+            );
+            const clearTouchPreview = () => {
+              clearPreview();
+            };
+            cell.addEventListener("touchend", clearTouchPreview, {
+              passive: true,
+            });
+            cell.addEventListener("touchcancel", clearTouchPreview, {
+              passive: true,
             });
             cell.addEventListener("focus", () => {
               if (!isAlive(row, col)) return;
